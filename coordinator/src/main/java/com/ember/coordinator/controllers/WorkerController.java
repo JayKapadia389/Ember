@@ -1,12 +1,10 @@
 package com.ember.coordinator.controllers;
 
+import com.ember.coordinator.dtos.PingResponseDto;
 import com.ember.coordinator.dtos.WorkerRegistrationDto;
 import com.ember.coordinator.services.WorkerService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
@@ -20,5 +18,10 @@ public class WorkerController {
     @PostMapping("/register")
     UUID registerWorker(@RequestBody WorkerRegistrationDto workerRegistrationDto) {
         return workerService.registerWorker(workerRegistrationDto);
+    }
+
+    @GetMapping("/ping/{workerId}")
+    PingResponseDto ping(@PathVariable UUID workerId) {
+        return new PingResponseDto();
     }
 }
