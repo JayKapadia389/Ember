@@ -1,6 +1,6 @@
 package com.ember.coordinator.exceptions;
 
-import com.ember.coordinator.ErrorConstants;
+import com.ember.coordinator.errors.ErrorConstants;
 
 import java.util.UUID;
 

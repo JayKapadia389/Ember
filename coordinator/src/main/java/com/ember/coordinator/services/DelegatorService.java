@@ -1,7 +1,7 @@
 package com.ember.coordinator.services;
 
 import com.ember.coordinator.dtos.StatusDto;
-import com.ember.coordinator.dtos.TaskDTO;
+import com.ember.coordinator.dtos.TaskDto;
 import com.ember.coordinator.entities.Task;
 import com.ember.coordinator.enums.Model;
 import com.ember.coordinator.enums.TaskStatus;
@@ -32,7 +32,7 @@ public class DelegatorService {
         return null;
     }
 
-    private Task toEntity(TaskDTO taskDTO) {
+    private Task toEntity(TaskDto taskDTO) {
         Task task = new Task();
         System.out.println("model name >>" + taskDTO.model());
         task.setModel(stringToModel(taskDTO.model()));
@@ -40,7 +40,7 @@ public class DelegatorService {
         return task;
     }
 
-    public UUID createNewTask(TaskDTO taskDTO) {
+    public UUID createNewTask(TaskDto taskDTO) {
         Task task = toEntity(taskDTO);
         taskRepository.save(task);
         return task.getId();

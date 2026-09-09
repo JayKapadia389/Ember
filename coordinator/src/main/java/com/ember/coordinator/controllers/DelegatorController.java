@@ -1,7 +1,7 @@
 package com.ember.coordinator.controllers;
 
 import com.ember.coordinator.dtos.StatusDto;
-import com.ember.coordinator.dtos.TaskDTO;
+import com.ember.coordinator.dtos.TaskDto;
 import com.ember.coordinator.services.DelegatorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -16,7 +16,7 @@ public class DelegatorController {
     private final DelegatorService delegatorService;
 
     @PostMapping("/new")
-    public UUID createNewTask(@RequestBody TaskDTO taskDTO) {
+    public UUID createNewTask(@RequestBody TaskDto taskDTO) {
         return delegatorService.createNewTask(taskDTO);
     }
 
