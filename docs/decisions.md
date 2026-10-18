@@ -251,9 +251,32 @@ on its consumer) or a shared `common/` package (becomes a dumping ground).
 **Bonus:** Matches Spring Modulith's convention, so its boundary checks pass
 without extra configuration if adopted later.
 
+## 026: Exception handling
+
+**Decision:** One global handler (`@RestControllerAdvice`) in `common/`. `common`
+defines an abstract `EmberException` (extends `RuntimeException`) carrying an
+`ErrorKind` (NOT_FOUND, CONFLICT, INVALID). Domain exceptions live in their own
+domain and extend it. The handler maps `ErrorKind` to an HTTP status.
+**Rules:** `common` never imports domain classes. Services throw domain exceptions,
+never HTTP types (`ErrorKind` is our own enum, not `HttpStatus`). Error bodies use
+`ProblemDetail` (RFC 9457), so every error has one shape. Framework exceptions
+(malformed JSON, missing header, bad enum value) go through the same handler.
+**Reason:** If `common` caught domain exceptions by name, it would depend on every
+domain while every domain depends on it, a cycle (Acyclic Dependencies Principle).
+`common` is used by everything, so it must be the most stable package and must not
+depend on packages that change often (Stable Dependencies Principle). A new error
+type is a new subclass and the handler never changes (Open/Closed).
+**Rejected:** Named handlers per domain exception in `common`. Per-domain handlers
+scattered across controllers.
+**Base class, not interface:** `@ExceptionHandler` accepts only exception classes,
+and an interface can't extend `RuntimeException`.
+**Note:** This resembles Dependency Inversion in shape but isn't it: the handler is
+the low-level (delivery) side, and low depending on high is the correct direction.
+DIP proper applies to `JobService` and artifact storage: an `ArtifactStore`
+interface owned by `job/`, implemented by local disk and later S3.
+
 ---
 
 ## Open questions
 
 - Output upload mechanism (multipart to coordinator vs presigned URLs).
-- Exception handling in the coordinator.
