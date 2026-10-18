@@ -2,6 +2,7 @@ package com.ember.coordinator.worker;
 
 import com.ember.coordinator.worker.dto.WorkerRegistrationRequest;
 import com.ember.coordinator.worker.dto.WorkerRegistrationResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +21,7 @@ public class WorkerController {
     private final WorkerService workerService;
 
     @PostMapping
-    public ResponseEntity<WorkerRegistrationResponse> register(@RequestBody WorkerRegistrationRequest request) {
+    public ResponseEntity<WorkerRegistrationResponse> register(@Valid @RequestBody WorkerRegistrationRequest request) {
         UUID id = workerService.register(request);
         return ResponseEntity
                 .created(URI.create("/workers/" + id))

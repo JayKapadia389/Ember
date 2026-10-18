@@ -261,6 +261,10 @@ domain and extend it. The handler maps `ErrorKind` to an HTTP status.
 never HTTP types (`ErrorKind` is our own enum, not `HttpStatus`). Error bodies use
 `ProblemDetail` (RFC 9457), so every error has one shape. Framework exceptions
 (malformed JSON, missing header, bad enum value) go through the same handler.
+Anything else (e.g. `DataAccessException` when Postgres is down) hits a catch-all:
+500 with a generic detail, full exception logged, nothing internal sent to the client.
+Integrity violations are not mapped to 409 globally; real conflicts are checked in
+the service and thrown as `EmberException` with `CONFLICT`.
 **Reason:** If `common` caught domain exceptions by name, it would depend on every
 domain while every domain depends on it, a cycle (Acyclic Dependencies Principle).
 `common` is used by everything, so it must be the most stable package and must not
@@ -274,6 +278,20 @@ and an interface can't extend `RuntimeException`.
 the low-level (delivery) side, and low depending on high is the correct direction.
 DIP proper applies to `JobService` and artifact storage: an `ArtifactStore`
 interface owned by `job/`, implemented by local disk and later S3.
+
+## 027: Request validation
+
+**Decision:** Bean Validation (`spring-boot-starter-validation`) annotations on request
+DTOs, `@Valid` on `@RequestBody`. `GlobalExceptionHandler` extends Spring's
+`ResponseEntityExceptionHandler`, so validation failures and other framework errors
+(malformed JSON, missing header, type mismatch) come back as `ProblemDetail`.
+Validation failures add an `errors` property mapping field name to message.
+**Rules:** Shape checks (required, ranges, lengths) go on the DTO. Rules that need
+state (e.g. unknown worker) are thrown from the service as `EmberException`
+subclasses. Required numeric fields use wrapper types (`Integer`), since a missing
+`int` silently becomes 0 and `@NotNull` can't catch it.
+**Rejected:** Validating by hand in services (duplicates what the framework does).
+One `@ExceptionHandler` per framework exception (each new case would need adding).
 
 ---
 
