@@ -22,13 +22,6 @@ public class WorkerService {
         return savedWorker.getId();
     }
 
-    @Transactional
-    public boolean deregister(UUID id) {
-        if (!workerRepository.existsById(id)) return false;
-        workerRepository.deleteById(id);
-        return true;
-    }
-
     @Transactional(readOnly = true)
     public Optional<WorkerSpecs> getSpecs(UUID id) {
         return workerRepository.findSpecsById(id);

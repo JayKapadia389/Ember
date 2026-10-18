@@ -1,0 +1,9 @@
+.idea/
+*.iml
+
+# Python worker
+.venv/
+__pycache__/
+
+# Local artifact storage
+data/
