@@ -470,6 +470,24 @@ model, and a shared field can't have different limits per model.
 **Later:** an endpoint that returns each model and its schema, so clients can see what
 each model accepts. Similar to SCIM's discovery endpoints.
 
+## 038: Worker-facing endpoints
+
+**Placement rule:** an endpoint lives in the domain whose data it changes. One that
+coordinates several domains lives in `scheduling/`. The URL doesn't decide the package.
+**Endpoints:** all take the `X-Worker-Id` header.
+- `POST /scheduling/poll`: 200 with `{jobId, modelId, params}`, or 204 when nothing fits.
+- `POST /scheduling/heartbeat`: body `{jobId}` (null when idle). Answers `{owned}`.
+  `owned: false` means stop the job and discard the result.
+- `POST /jobs/{id}/result`: multipart with `outcome` (COMPLETED | FAILED), `error`
+  (FAILED only) and an `output` file (COMPLETED only). 204 on success.
+- `POST /jobs/{id}/release`: 204 on success.
+  **Rejections:** result and release answer 404 if the job doesn't exist and 409 if it
+  isn't ASSIGNED to this worker (which also covers a retried upload, 033).
+  A malformed or missing header is a 400.
+  **Poll is POST:** it changes state (claims a job, updates last_seen_at).
+  **Every worker request counts as a sign of life** and rejects unknown IDs the same way:
+  `WorkerService.recordSeen` runs first in each.
+
 ## 039: Unknown worker signaled by ProblemDetail type
 
 **Decision:** an unknown worker ID returns 404 with type `urn:ember:unknown-worker`.
