@@ -470,6 +470,14 @@ model, and a shared field can't have different limits per model.
 **Later:** an endpoint that returns each model and its schema, so clients can see what
 each model accepts. Similar to SCIM's discovery endpoints.
 
+## 039: Unknown worker signaled by ProblemDetail type
+
+**Decision:** an unknown worker ID returns 404 with type `urn:ember:unknown-worker`.
+The worker deletes its saved ID only when both match (035).
+`EmberException` carries an optional type that the handler copies over.
+**Rejected:** a custom `code` property (not a standard field). A distinct status such
+as 410 (bends its meaning, and a proxy could return it too).
+
 ---
 
 ## Open questions

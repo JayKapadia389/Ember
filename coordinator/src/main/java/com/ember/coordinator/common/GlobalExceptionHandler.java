@@ -27,7 +27,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             case CONFLICT -> HttpStatus.CONFLICT;
             case INVALID -> HttpStatus.BAD_REQUEST;
         };
-        return ProblemDetail.forStatusAndDetail(status, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
+        if (e.getType() != null) {
+            problem.setType(e.getType());
+        }
+        return problem;
     }
 
     @ExceptionHandler(Exception.class)
