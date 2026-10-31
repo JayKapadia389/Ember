@@ -478,6 +478,11 @@ The worker deletes its saved ID only when both match (035).
 **Rejected:** a custom `code` property (not a standard field). A distinct status such
 as 410 (bends its meaning, and a proxy could return it too).
 
+## 040: FAILED message stored on the job
+
+**Decision:** `jobs.error_message TEXT`, added in V2. `GET /jobs/{id}` returns it as `error`.
+**Rejected:** storing it as a text artifact (awkward to read back for one string).
+
 ---
 
 ## Open questions
