@@ -483,6 +483,18 @@ as 410 (bends its meaning, and a proxy could return it too).
 **Decision:** `jobs.error_message TEXT`, added in V2. `GET /jobs/{id}` returns it as `error`.
 **Rejected:** storing it as a text artifact (awkward to read back for one string).
 
+## 041: Output storage and download
+
+**Decision:** behind an `ArtifactStore` interface owned by `job/` (026). The v1
+implementation writes to local disk at `./data/artifacts/{jobId}/output`
+(`ember.artifacts.dir`). The artifact row records the file URI and the uploaded
+content type, with role OUTPUT. Clients download with `GET /jobs/{id}/output`.
+**Order in the result transaction:** the conditional UPDATE runs first (locks the row
+and rejects a second upload before any bytes are written), then the file write, then
+the artifact row. A failed write is unchecked and rolls everything back.
+**Accepted:** a crash between the file write and the commit leaves an orphan file.
+Uploads are capped at 20MB.
+
 ## 043: Model params and VRAM requirements
 
 **Params:** `text.json` has `prompt` (required), `max_new_tokens`, `temperature`,
