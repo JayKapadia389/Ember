@@ -107,8 +107,8 @@ new infrastructure.
 UPDATE jobs SET status = 'ASSIGNED', assigned_worker_id = :w, assigned_at = now()
 WHERE id = (SELECT id FROM jobs WHERE status = 'QUEUED'
             ORDER BY created_at LIMIT 1
-            FOR UPDATE SKIP LOCKED)
-RETURNING *;
+    FOR UPDATE SKIP LOCKED)
+            RETURNING *;
 ```
 
 **Reason:** The subquery locks the row as it picks it. A concurrent worker skips the
@@ -261,10 +261,6 @@ domain and extend it. The handler maps `ErrorKind` to an HTTP status.
 never HTTP types (`ErrorKind` is our own enum, not `HttpStatus`). Error bodies use
 `ProblemDetail` (RFC 9457), so every error has one shape. Framework exceptions
 (malformed JSON, missing header, bad enum value) go through the same handler.
-Anything else (e.g. `DataAccessException` when Postgres is down) hits a catch-all:
-500 with a generic detail, full exception logged, nothing internal sent to the client.
-Integrity violations are not mapped to 409 globally; real conflicts are checked in
-the service and thrown as `EmberException` with `CONFLICT`.
 **Reason:** If `common` caught domain exceptions by name, it would depend on every
 domain while every domain depends on it, a cycle (Acyclic Dependencies Principle).
 `common` is used by everything, so it must be the most stable package and must not
@@ -279,22 +275,203 @@ the low-level (delivery) side, and low depending on high is the correct directio
 DIP proper applies to `JobService` and artifact storage: an `ArtifactStore`
 interface owned by `job/`, implemented by local disk and later S3.
 
-## 027: Request validation
+## 027: Worker configuration
 
-**Decision:** Bean Validation (`spring-boot-starter-validation`) annotations on request
-DTOs, `@Valid` on `@RequestBody`. `GlobalExceptionHandler` extends Spring's
-`ResponseEntityExceptionHandler`, so validation failures and other framework errors
-(malformed JSON, missing header, type mismatch) come back as `ProblemDetail`.
-Validation failures add an `errors` property mapping field name to message.
-**Rules:** Shape checks (required, ranges, lengths) go on the DTO. Rules that need
-state (e.g. unknown worker) are thrown from the service as `EmberException`
-subclasses. Required numeric fields use wrapper types (`Integer`), since a missing
-`int` silently becomes 0 and `@NotNull` can't catch it.
-**Rejected:** Validating by hand in services (duplicates what the framework does).
-One `@ExceptionHandler` per framework exception (each new case would need adding).
+**Coordinator URL:** written in the code as a default. During development, a
+`.env` file (read with python-dotenv) sets `EMBER_COORDINATOR_URL` to localhost.
+`.env` is gitignored and never shipped, so users get the default.
+**Reason:** Ember has one coordinator, like Instagram has one server. Users never
+configure it. The `.env` file plays the role of a debug build.
+**Rejected:** Command-line flag or user config file for the URL. Those suit tools
+that connect to many servers (kubectl, Docker, GitHub runner), which Ember isn't.
+**Not sensitive:** the URL is public, like any frontend API URL.
+**Worker ID:** saved to a local file after registration and reused on restart.
+For v1, the default URL is `http://localhost:8080`.
+
+## 028: GPU-only workers
+
+**Decision:** The worker requires an NVIDIA GPU. With no GPU, it exits with a clear
+message. No CPU jobs.
+**Reason:** A GPU marketplace running jobs on CPU makes no sense for clients.
+Running gpt2 on CPU was only a development convenience.
+**Supersedes:** the CPU reasoning for gpt2 in 003. gpt2 will be replaced.
+**Testing:** on the local machine for now. Remote options (Colab, Kaggle, EC2) need
+the coordinator exposed through a tunnel or hosted.
+
+## 029: Two worker commands, setup and start
+
+**`ember setup`:** checks for a GPU, registers and saves the worker ID, asks
+permission, downloads the models. Safe to run twice: keeps an existing ID, skips
+models already downloaded.
+**`ember start`:** checks the GPU, checks setup is done (ID file exists and models are
+downloaded), tells the user to run setup if not, then polls and runs jobs.
+**Reason:** `pip install` only copies files and can't run checks or ask questions, so
+setup has to be a command. Same split as the GitHub Actions runner
+(`config.sh`, `run.sh`).
+**Logging:** only on state changes (waiting, got job, running, done, failed,
+coordinator unreachable). Per-poll lines at debug level only.
+
+## 030: Models load into VRAM on demand, one at a time
+
+**Decision:** The worker loads a model only when a job needs it, and keeps it loaded.
+The next job with the same model reuses it. A job for a different model unloads the
+old one and loads the new one.
+**Reason:** There is no cache-aware scheduling yet, so loading a model in advance may
+be wasted. Keeping only one model in VRAM also means two models don't need to fit
+together.
+**Cost accepted:** jobs that alternate between models swap every time.
+**Rule:** when swapping, delete the model and call `torch.cuda.empty_cache()`,
+otherwise PyTorch keeps the memory reserved.
+**Note:** setup still downloads every model to disk. Only VRAM loading is lazy.
+
+## 031: Models live in the Hugging Face cache only
+
+**Decision:** The worker uses the standard Hugging Face cache. It doesn't ask users for
+model folders. Setup downloads a model only if it isn't already cached. Each model is
+pinned to an exact revision. Users who want another drive can set `HF_HOME`.
+**Reason:** Anyone who already downloaded the model through Hugging Face has it in
+that cache, so it's reused automatically. User-given folders may be wrong,
+incomplete, or a different version of the model.
+**Safetensors only:** load with `use_safetensors=True`. Older `.bin` files use pickle,
+which can run code when loaded.
+**Limit:** downloads are hash-checked, but files aren't re-checked at load time.
+Trusting results from workers is a separate, later problem.
+
+## 032: Worker failure handling
+
+**Whose fault decides the outcome:**
+- Client's fault (bad params, input the model rejects): the job is FAILED. Retrying
+  won't help.
+- Worker's fault (model missing, out of VRAM, crash, shutdown): the job goes back to
+  the queue so another worker can run it.
+
+**Heartbeats:** the worker sends heartbeats every few seconds from a background
+thread, including while a job is running. Heartbeats keep the worker marked alive.
+
+**Dead worker cleanup:** a scheduled task on the coordinator runs every minute.
+Workers silent for more than a minute are treated as dead, and their assigned jobs
+go back to the queue. This is the fallback for cases where the worker can't report
+anything (crash, power cut, network loss).
+
+**Release:** for worker faults it can detect, the worker tells the coordinator right
+away so the job goes back to the queue without waiting for cleanup. A release only
+takes effect if the job is still assigned to that worker. Used when a model is
+missing, when the job runs out of VRAM, and on Ctrl+C before exiting.
+
+**Ownership check:** each heartbeat says which job the worker is running, and the
+coordinator answers whether the worker still owns it.
+- Still assigned to this worker: continue.
+- Put back in the queue but not yet taken: it's given back to this worker; continue.
+- Taken by another worker, or already finished: the worker stops the job and
+  discards the result.
+  The check and the hand-back happen as one atomic step, so they can't race with
+  another worker claiming the job.
+
+**Model deleted after setup:** the worker releases the job, exits, and tells the user
+to run setup.
+
+**GPU in use by something else:** before polling, the worker checks free VRAM. If
+there isn't enough, it doesn't poll and waits. Running out of VRAM mid-job is a
+worker fault. Stopping a job the moment the owner starts using the GPU is a later
+feature.
+
+## 033: Worker retries and backoff
+
+**Which failures are retried:**
+- Retried: connection errors, timeouts, 429, 502, 503, 504. These are temporary:
+  the coordinator is down, restarting, overloaded, or the network is out.
+- Not retried: 400, 404, 409. Sending the same request again gives the same answer.
+
+**How:** exponential backoff with jitter, capped at about a minute. The wait grows
+after each failure and resets to normal after a success. If the coordinator sends a
+`Retry-After`, the worker follows it.
+**Never give up:** the worker runs in the background, so it keeps retrying.
+**Logging:** once when failures start, once when the connection is back. Not on every
+attempt.
+
+**Reasons:**
+- Exponential: an outage may last seconds or hours. Fast retries at first catch short
+  blips; long waits come after a few steps, so long outages aren't hammered.
+- Jitter: workers that failed at the same moment don't all retry at the same
+  moment (thundering herd), especially when a restarted coordinator is at its weakest.
+- Cap: without it, waits grow so long that a worker wouldn't notice the coordinator
+  is back for hours.
+- Reset on success: success means the coordinator is up, and the normal rate is the
+  load it's built for. Jitter already spreads reconnections out.
+
+**Backoff vs scaling:** scaling handles steady growth in load. Backoff handles
+failures, where more coordinators wouldn't help.
+
+**Timeouts are ambiguous:** the coordinator may have done the work and only the
+response was lost.
+- Lost poll response: a job can be assigned to a worker that doesn't know about it.
+  If a worker's heartbeat reports no job but a job is assigned to it, the coordinator
+  puts that job back in the queue.
+- Lost result upload response: the worker retries. A 409 on the retry likely means
+  the first upload went through.
+
+## 034: Results are uploaded as multipart
+
+**Decision:** the worker submits a result as one multipart request: the outcome and
+error message as text fields, the output as a file. The coordinator stores the file
+and records its content type, and sends that type back when the client downloads it.
+**Reason:** multipart is the standard way to send a few fields plus a file in one
+request. The file travels as-is.
+**Rejected:** file inside JSON (must be converted to text, about a third bigger, and
+held in memory). Raw file as the body with fields in headers (awkward with several
+fields).
+**Later:** workers upload straight to object storage using a temporary link from the
+coordinator, so large files never pass through it.
+
+## 035: Unknown worker ID
+
+**Coordinator:** rejects any request with a worker ID it doesn't know, with a specific
+error code meaning "unknown worker."
+**Worker:** on that response, deletes the saved ID and tells the user to run setup.
+Setup finds no ID and registers again.
+**Safeguard:** the ID is deleted only on that specific error code, never on a plain
+404 or a connection error, so a wrong URL can't wipe a valid ID.
+**Accepted for v1:** if the user deletes or alters the ID file, the only fix is to run
+setup and get a new ID. The GPU UUID identity in 021 removes this later.
+
+## 036: Model catalog for v1
+
+**Decision:** two models, both needing under 6GB of VRAM:
+- Text: Qwen3-1.7B (`Qwen/Qwen3-1.7B`), about 4GB. Thinking mode off, since it makes
+  jobs much longer.
+- Image: Stable Diffusion 1.5 from the mirror
+  `stable-diffusion-v1-5/stable-diffusion-v1-5`, since the original repo was removed.
+  Fixed at 512×512.
+  **Supersedes:** 003. gpt2 is removed: workers are GPU-only (028), and gpt2 continues
+  text instead of answering, so its output makes a poor demo.
+  **Fit:** only one model is in VRAM at a time (030), so each needs to fit alone, not
+  together.
+
+## 037: Job params validated against a schema per model
+
+**Request shape:** a DTO holds the fixed fields (`modelId`, `params`), checked with
+validation annotations. The content of `params` is kept as a map, because its shape
+depends on the model.
+**Validation:** each model has its own JSON Schema file in the coordinator. Before a
+job is saved, `params` is checked against the chosen model's schema with a schema
+library (networknt): required params, types, limits, and no params the model
+doesn't support.
+**Reuse:** params shared by a kind of model (text, image) live in a shared schema that
+each model's schema includes, adding its own params on top. A model's schema must
+reject any param defined in neither its own nor the shared schema.
+**Unknown fields are rejected, never ignored:** both unknown params and unknown
+top-level fields in the request return an error. The client must never believe a
+setting was applied when it wasn't.
+**Defaults:** applied by the worker when running the job. Defaults in a schema are
+only descriptive; the validator doesn't fill them in.
+**Rejected:** one DTO holding every possible param from every model. It worked in the
+SCIM project because a User's attributes are fixed, but here it grows with every
+model, and a shared field can't have different limits per model.
+**Later:** an endpoint that returns each model and its schema, so clients can see what
+each model accepts. Similar to SCIM's discovery endpoints.
 
 ---
 
 ## Open questions
 
-- Output upload mechanism (multipart to coordinator vs presigned URLs).
+None right now.
