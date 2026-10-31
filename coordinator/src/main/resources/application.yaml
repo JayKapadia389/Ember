@@ -23,3 +23,7 @@ spring:
 ember:
   artifacts:
     dir: ./data/artifacts
+  scheduling:
+    sweep-interval: 60s
+    worker-timeout: 60s
+    orphan-grace: 15s

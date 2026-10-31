@@ -513,6 +513,23 @@ the artifact row. A failed write is unchecked and rolls everything back.
 **Accepted:** a crash between the file write and the commit leaves an orphan file.
 Uploads are capped at 20MB.
 
+## 042: Liveness and requeue mechanics
+
+**Timings:** the worker heartbeats every 5s. The sweep runs every 60s. A worker counts
+as dead after 60s of silence. All are config under `ember.scheduling`.
+**Sweep starts from assigned jobs:** it gets the IDs of workers holding ASSIGNED jobs,
+asks `worker/` which of them are silent, and requeues their jobs. Starting from workers
+would scan every dead row ever registered, since workers are never deleted (020).
+**Same clock:** silence is compared with the database's `now()`, the clock that wrote
+`last_seen_at`.
+**Orphans (033):** a heartbeat requeues every job assigned to the worker except the
+one it reports, not only when it reports none.
+**Grace period:** a job assigned less than 15s ago is not treated as an orphan.
+Without it, a heartbeat sent while a poll response is in flight would requeue the job
+the worker is about to start. Even then, the next heartbeat's hand-back (032) would
+recover it if no one else had claimed it.
+**Requeue clears the worker:** `assigned_worker_id` and `assigned_at` go back to NULL.
+
 ## 043: Model params and VRAM requirements
 
 **Params:** `text.json` has `prompt` (required), `max_new_tokens`, `temperature`,
@@ -531,4 +548,6 @@ requirement fits the worker's registered VRAM. Provisional until measured.
 
 ## Open questions
 
-None right now.
+- **VRAM requirements:** 5120MB per model is a guess. Measure peak usage on a real GPU.
+- **Requeue loops:** a job that runs out of VRAM is released (032) and can be claimed
+  again by the same worker, forever. Needs an attempt count or a per-worker exclusion.
