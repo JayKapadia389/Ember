@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ember.dev/schemas/params/stable-diffusion-1.5.json",
+  "title": "Stable Diffusion 1.5 params. Output is fixed at 512x512 (decision 036).",
+  "$ref": "image.json",
+  "unevaluatedProperties": false
+}

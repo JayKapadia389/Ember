@@ -483,6 +483,20 @@ as 410 (bends its meaning, and a proxy could return it too).
 **Decision:** `jobs.error_message TEXT`, added in V2. `GET /jobs/{id}` returns it as `error`.
 **Rejected:** storing it as a text artifact (awkward to read back for one string).
 
+## 043: Model params and VRAM requirements
+
+**Params:** `text.json` has `prompt` (required), `max_new_tokens`, `temperature`,
+`top_p`, `seed`. Qwen3-1.7B adds `top_k`. `image.json` has `prompt` (required),
+`negative_prompt`, `num_inference_steps`, `guidance_scale`, `seed`. Names follow the
+transformers and diffusers keyword arguments, so the worker passes them straight through.
+Model schemas use `$ref` to the shared one plus `unevaluatedProperties: false` (037).
+**Library:** networknt json-schema-validator 3.x, the line built on Jackson 3 like Boot 4.
+**Strict JSON:** `fail-on-unknown-properties` is on globally, so unknown top-level
+fields are rejected on every endpoint (037).
+**VRAM:** each model requires 5120MB for now. The claim only offers models whose
+requirement fits the worker's registered VRAM. Provisional until measured.
+**Job type** (TEXT, IMAGE) comes from the catalog, not the client.
+
 ---
 
 ## Open questions
