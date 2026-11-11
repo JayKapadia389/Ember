@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ember.dev/schemas/params/qwen3-1.7b.json",
+  "title": "Qwen3-1.7B params",
+  "$ref": "text.json",
+  "properties": {
+    "top_k": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+  },
+  "unevaluatedProperties": false
+}
